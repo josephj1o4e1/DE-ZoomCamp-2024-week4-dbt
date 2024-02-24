@@ -4,4 +4,12 @@ target/
 dbt_packages/
 logs/
 hw*.txt
+.env
+*.json
+tmp.py
+*.parquet
+*.gz
+*.csv
+
+
 
