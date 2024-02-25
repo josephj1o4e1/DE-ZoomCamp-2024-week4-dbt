@@ -10,6 +10,7 @@ tmp.py
 *.parquet
 *.gz
 *.csv
+tmp*.txt
 
 
 

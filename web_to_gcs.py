@@ -1,5 +1,5 @@
 import io
-import os
+import os, sys
 import requests
 import pandas as pd
 from google.cloud import storage
@@ -14,38 +14,29 @@ Pre-reqs:
 2. Set GOOGLE_APPLICATION_CREDENTIALS to your project/service-account key
 3. Set GCP_GCS_BUCKET as your bucket or change default value of BUCKET
 
-GCS doesn't allow uploaded object be immuted. Can't write and append in chunks!
-with open(local_file, 'rb') as f: ??
-    blob.upload_from_filename(f) ??
-status, response = request.next_chunk() ??
 
+[I WANT TO UPLOAD HUGE LOCAL PARQUET FILE TO GCS (as a single parquet file)]: 
+Other than fhv_tripdata_2019-01.csv.gz, all months of 2019 fhv dataset were succesfully uploaded. 
+fhv_tripdata_2019-01.csv.gz is too large. 
 
-[Streaming Upload to GCS]: 
+Thought 1.
+Reading from pandas dataframe chunk-by-chunk to avoid loading whole dataset to memory. 
+    => but google cloud storage bucket isn't immutable, 
+        we can't "append" (aka modify) to the gcs file after uploading to gcs. 
 
-import pandas as pd
-from io import BytesIO
-file_io = BytesIO()
-with open('file.csv', 'rb') as f:
-   file_io.write(f.read())
+Thought 2.
+Streaming Upload with BytesIO?
+    put chunks together into a single BytesIO stream, and stream to gcs. 
+    => For csv, 
+        implemented csv streaming for a few chunks, but killed(OOM) for streaming all the chunks with same single BytesIO.  
+    => For parquet, 
+        streaming in parquet is difficult.
+    P.S. googlebigquery doesn't allow multiple formats when creating single external table. 
+        either every bucket files are all parquet or all csv. 
 
-# Rewind the stream to the beginning. This step can be omitted if the input
-# stream will always be at a correct position.
-file_io.seek(0)
-# Upload data from the stream to your bucket.
-storage.blob._MAX_MULTIPART_SIZE = 5 * 1024 * 1024  # 5 MB
-storage.blob._DEFAULT_CHUNKSIZE = 5 * 1024 * 1024  # 5 MB
-client = storage.Client().from_service_account_json(credentials_file)
-bucket = client.bucket(bucket)
-blob = bucket.blob(object_name)
-blob.upload_from_file(file_io)
-
-What if file.csv.gz???? how to make it parquet?????
-    csv_buffer = BytesIO()
-    with gzip.open('file.csv.gz', 'rb') as f:
-        csv_buffer.write(f.read())
-    df = pd.read_csv(csv_buffer)
-    parquet_buffer = BytesIO()
-    df.to_parquet(parquet_buffer) 
+Thought 3.
+Upload parquet chunk-by-chunk into different filenames under a same folder fhv_tripdata_2019-01. 
+and create external tables all at once specifying all the gcs parquet files. 
 
 """
 
@@ -56,9 +47,26 @@ BUCKET_NAME = os.environ.get("BUCKET_NAME", "provide the data-lake-bucketname")
 CREDENTIALS_FILE = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "provide the credentials from gcs")
 
 
-def upload_to_gcs(bucket, object_name, local_file, credentials_file):
+# def upload_to_gcs(bucket, object_name, local_file, credentials_file):
+#     """
+#     Ref: https://cloud.google.com/storage/docs/uploading-objects#storage-upload-object-python
+#     """
+#     # # WORKAROUND to prevent timeout for files > 6 MB on 800 kbps upload speed.
+#     # # (Ref: https://github.com/googleapis/python-storage/issues/74)
+#     storage.blob._MAX_MULTIPART_SIZE = 5 * 1024 * 1024  # 5 MB
+#     storage.blob._DEFAULT_CHUNKSIZE = 5 * 1024 * 1024  # 5 MB
+
+#     client = storage.Client().from_service_account_json(credentials_file)
+#     bucket = client.bucket(bucket)
+#     blob = bucket.blob(object_name) # object_name is the desired name shown on gcs. 
+#     blob.upload_from_filename(local_file) # local_file is the local file name desired to upload to gcs. 
+
+
+# Stream upload it to gcs 
+def upload_to_gcs(bucket, object_name, buffer, credentials_file):
     """
     Ref: https://cloud.google.com/storage/docs/uploading-objects#storage-upload-object-python
+        https://cloud.google.com/storage/docs/streaming-uploads#client-libraries 
     """
     # # WORKAROUND to prevent timeout for files > 6 MB on 800 kbps upload speed.
     # # (Ref: https://github.com/googleapis/python-storage/issues/74)
@@ -68,12 +76,14 @@ def upload_to_gcs(bucket, object_name, local_file, credentials_file):
     client = storage.Client().from_service_account_json(credentials_file)
     bucket = client.bucket(bucket)
     blob = bucket.blob(object_name) # object_name is the desired name shown on gcs. 
-    blob.upload_from_filename(local_file) # local_file is the local file name desired to upload to gcs. 
+    buffer.seek(0)
+    blob.upload_from_file(buffer) # the buffer for stream upload to gcs. 
+
 
 def web_to_gcs(year, service):
+    tt0 = time.time()
     for i in range(12):
         t0 = time.time()
-        if i==0: continue
         # sets the month part of the file_name string
         month = '0'+str(i+1)
         month = month[-2:]
@@ -90,19 +100,29 @@ def web_to_gcs(year, service):
         else: 
             print(f"Local (already downloaded): {file_name}")
 
-        # read it back into a parquet file
-        df = pd.read_csv(file_name, compression='gzip')
-        print(f'read csv memory usage: \n{df.memory_usage()}')
-        file_name = file_name.replace('.csv.gz', '.parquet')
-        df.to_parquet(file_name, engine='pyarrow')
-        print(f'to parquet memory usage: \n{df.memory_usage()}')
-        print(f"Parquet: {file_name}")
-        print(f'Size file = {os.path.getsize(file_name)  >> 20} MB')
+        # parquet simple chunking
+        df_iter = pd.read_csv(file_name, compression='gzip', iterator=True, chunksize=100000)
+        df_len = 0
+        df_memsize = 0
+        for i, df in enumerate(df_iter):
+            # print(f'CHUNK {i}\nread csv memory usage: \n{df.memory_usage()}')
+            parquet_buffer = io.BytesIO()
+            df.to_parquet(parquet_buffer, engine='pyarrow')
+            df_len+=len(df)
+            df_memsize+=sys.getsizeof(parquet_buffer) >> 20
 
-        # upload it to gcs 
-        upload_to_gcs(BUCKET_NAME, f"{service}/{file_name}", file_name, CREDENTIALS_FILE)
-        print(f'Successfully uploaded! time spent: {time.time()-t0}')
-        print(f"GCS: {service}/{file_name} \n")
+            # file_name = file_name.replace('.csv.gz', '.parquet')
+            folder_name = file_name[:file_name.find('.')]
+            parquet_buffer.seek(0)
+            upload_to_gcs(BUCKET_NAME, f"{service}/{folder_name}/chunk{i}.parquet", parquet_buffer, CREDENTIALS_FILE)
+            print(f'{year}-{month} chunk{i}.parquet uploaded')
+            print(f'row count: {df_len}')
+            print(f'memsize: {df_memsize} MB')
+
+        print(f'SUCCESSFULLY uploaded to GCS: {service}/{folder_name}')
+        print(f'TOTAL of {df_len} Rows, {df_memsize} MB')
+        print(f'DONE in time: {time.time() - t0} secs!!\n\n\n')
+    print(f'FINISHED ALL IN {time.time()-tt0} secs')
 
 
 # web_to_gcs('2019', 'green')
