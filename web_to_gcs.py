@@ -46,20 +46,16 @@ init_url = 'https://github.com/DataTalksClub/nyc-tlc-data/releases/download/'
 BUCKET_NAME = os.environ.get("BUCKET_NAME", "provide the data-lake-bucketname")
 CREDENTIALS_FILE = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "provide the credentials from gcs")
 
-
-# def upload_to_gcs(bucket, object_name, local_file, credentials_file):
-#     """
-#     Ref: https://cloud.google.com/storage/docs/uploading-objects#storage-upload-object-python
-#     """
-#     # # WORKAROUND to prevent timeout for files > 6 MB on 800 kbps upload speed.
-#     # # (Ref: https://github.com/googleapis/python-storage/issues/74)
-#     storage.blob._MAX_MULTIPART_SIZE = 5 * 1024 * 1024  # 5 MB
-#     storage.blob._DEFAULT_CHUNKSIZE = 5 * 1024 * 1024  # 5 MB
-
-#     client = storage.Client().from_service_account_json(credentials_file)
-#     bucket = client.bucket(bucket)
-#     blob = bucket.blob(object_name) # object_name is the desired name shown on gcs. 
-#     blob.upload_from_filename(local_file) # local_file is the local file name desired to upload to gcs. 
+# service = fhv
+service_dtypes = {
+    'dispatching_base_num': str, 
+    'pickup_datetime': str, 
+    'dropOff_datetime': str, 
+    'PUlocationID': float, 
+    'DOlocationID': float,
+    'SR_Flag': float,
+    'Affiliated_base_number': str
+}
 
 
 # Stream upload it to gcs 
@@ -101,7 +97,7 @@ def web_to_gcs(year, service):
             print(f"Local (already downloaded): {file_name}")
 
         # parquet simple chunking
-        df_iter = pd.read_csv(file_name, compression='gzip', iterator=True, chunksize=100000)
+        df_iter = pd.read_csv(file_name, compression='gzip', iterator=True, chunksize=100000, dtype=service_dtypes)
         df_len = 0
         df_memsize = 0
         for i, df in enumerate(df_iter):
