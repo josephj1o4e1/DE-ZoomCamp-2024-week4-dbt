@@ -40,15 +40,22 @@
 -- ;
 
 
-select count(*) from `trips_data_all.green_tripdata`;
-select count(*) from `trips_data_all.yellow_tripdata`;
-select count(*) from `trips_data_all.fhv_tripdata`;
 
+select count(*) from `trips_data_all.green_tripdata`; 
+-- 8035139
+select count(*) from `trips_data_all.yellow_tripdata`; 
+-- 109247514
+select count(*) from `trips_data_all.fhv_tripdata`; 
+-- 43244696
 
+SELECT count(*) FROM `level-night-412601.dbt_schuang.fact_fhv_trips`;
 
-
-
-
+SELECT count(*) FROM `level-night-412601.dbt_schuang.fact_fhv_trips` where DATE(pickup_datetime) between '2019-07-01' and '2019-07-31'; 
+-- fhv: 290680
+SELECT count(*) FROM `level-night-412601.dbt_schuang.fact_trips` where service_type='Green' and DATE(pickup_datetime) between '2019-07-01' and '2019-07-31'; 
+-- green: 415404
+SELECT count(*) FROM `level-night-412601.dbt_schuang.fact_trips` where service_type='Yellow' and DATE(pickup_datetime) between '2019-07-01' and '2019-07-31'; 
+-- yellow: 3248521
 
 
 
