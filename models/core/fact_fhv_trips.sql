@@ -31,3 +31,5 @@ inner join dim_zones as pickup_zone
 on fhv_tripdata.pickup_location_id = pickup_zone.location_id
 inner join dim_zones as dropoff_zone
 on fhv_tripdata.dropoff_location_id = dropoff_zone.location_id
+
+-- dbt build --select +fact_fhv_trips+ --vars '{'is_test_run': 'false'}'
