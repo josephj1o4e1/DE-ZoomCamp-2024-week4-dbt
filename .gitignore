@@ -11,6 +11,7 @@ tmp.py
 *.gz
 *.csv
 tmp*.txt
+*.pdf
 
 
 

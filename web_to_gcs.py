@@ -34,7 +34,7 @@ Streaming Upload with BytesIO?
     P.S. googlebigquery doesn't allow multiple formats when creating single external table. 
         either every bucket files are all parquet or all csv. 
 
-Thought 3.
+Thought 3 (***).
 Upload parquet chunk-by-chunk into different filenames under a same folder fhv_tripdata_2019-01. 
 and create external tables all at once specifying all the gcs parquet files. 
 
